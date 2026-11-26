@@ -1,8 +1,8 @@
-"""Flask web app for `compress` (Rust binary) and `merge` (Python).
+"""Flask web app for `compress` and `merge`.
 
 Endpoints accept multipart uploads and return the processed PDF as an
-attachment. `compress` delegates to the Rust `pdf-toolkit` binary via a
-temporary directory; `merge` runs in memory.
+attachment. Both `compress` and `merge` delegate to the Rust `pdf-toolkit`
+binary via a temporary directory.
 """
 
 import argparse
@@ -14,10 +14,21 @@ import tempfile
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from ..commands.merge import merge_bytes
-from ..utils import parse_size
-
 app = Flask(__name__)
+
+
+def parse_size(text):
+    """Convert '24mb' / '1.5mb' / '900kb' / '1048576' to bytes."""
+    t = text.strip().lower()
+    mult = 1
+    for suffix, m in (("kb", 1024), ("mb", 1024 ** 2), ("gb", 1024 ** 3), ("b", 1)):
+        if t.endswith(suffix):
+            mult, t = m, t[: -len(suffix)]
+            break
+    try:
+        return float(t) * mult
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid size: {text!r}")
 
 
 # --------------------------------------------------------------------------- #
@@ -90,8 +101,12 @@ def _find_binary():
     return shutil.which("pdf-toolkit")
 
 
-def _compress_rust(data, dpi, quality, grayscale, target):
-    """Run the Rust `compress` binary and return the resulting PDF bytes."""
+def _run_rust(args):
+    """Run the Rust `pdf-toolkit` binary with `args`.
+
+    Returns the completed process, raising `RuntimeError` if the binary is
+    missing or the process exits non-zero.
+    """
     binary = _find_binary()
     if binary is None:
         raise RuntimeError(
@@ -99,25 +114,48 @@ def _compress_rust(data, dpi, quality, grayscale, target):
             "compile con `cargo build --release`"
         )
 
+    proc = subprocess.run([binary, *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        message = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(message or f"pdf-toolkit falló (exit {proc.returncode})")
+    return proc
+
+
+def _compress_rust(data, dpi, quality, grayscale, target):
+    """Run the Rust `compress` binary and return the resulting PDF bytes."""
     with tempfile.TemporaryDirectory() as tmp:
         in_path = os.path.join(tmp, "input.pdf")
         out_path = os.path.join(tmp, "output.pdf")
         with open(in_path, "wb") as fh:
             fh.write(data)
 
-        cmd = [
-            binary, "compress", in_path, "-o", out_path,
+        args = [
+            "compress", in_path, "-o", out_path,
             "--dpi", str(dpi), "--quality", str(quality),
         ]
         if grayscale:
-            cmd.append("--grayscale")
+            args.append("--grayscale")
         if target is not None:
-            cmd += ["--target", str(target)]
+            args += ["--target", str(target)]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        if proc.returncode != 0:
-            message = (proc.stderr or proc.stdout or "").strip()
-            raise RuntimeError(message or f"compress falló (exit {proc.returncode})")
+        _run_rust(args)
+
+        with open(out_path, "rb") as fh:
+            return fh.read()
+
+
+def _merge_rust(data_files):
+    """Run the Rust `merge` binary on the input bytes and return the PDF bytes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        in_paths = []
+        for i, data in enumerate(data_files):
+            path = os.path.join(tmp, f"input-{i}.pdf")
+            with open(path, "wb") as fh:
+                fh.write(data)
+            in_paths.append(path)
+
+        out_path = os.path.join(tmp, "output.pdf")
+        _run_rust(["merge", *in_paths, "-o", out_path])
 
         with open(out_path, "rb") as fh:
             return fh.read()
@@ -161,7 +199,7 @@ def merge():
         return jsonify({"error": "no files uploaded"}), 400
 
     try:
-        out = merge_bytes([f.read() for f in files])
+        out = _merge_rust([f.read() for f in files])
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

@@ -1,6 +1,6 @@
 # SPEC 01 — Interfaz web para el toolkit
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** —
 > **Fecha:** 2026-11-25
 > **Objetivo:** Añadir una página web local que ejecute `compress` y `merge` de `pdf_toolkit` en memoria, subiendo PDFs desde el navegador y devolviendo el resultado como descarga automática.

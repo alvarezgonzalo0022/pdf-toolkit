@@ -1,3 +1,3 @@
-"""pdf-toolkit: a small multi-command PDF CLI built on PyMuPDF."""
+"""pdf-toolkit: Flask web interface for the pdf-toolkit."""
 
 __version__ = "0.1.0"

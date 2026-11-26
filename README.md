@@ -2,52 +2,66 @@
 
 Un toolkit de línea de comandos para manipular PDFs.
 
-- **`compress`** es un binario **Rust** (crate `pdf-toolkit`) construido sobre
-  MuPDF. Reemplaza al `compress` de Python con paridad funcional.
-- **`merge`** sigue en **Python** (PyMuPDF). La **web** (Flask) delega el
-  `compress` al binario Rust y corre el `merge` en Python.
+- **`compress`** y **`merge`** son subcomandos de un único binario **Rust**
+  (crate `pdf-toolkit`) construido sobre MuPDF.
+- La **web** (Flask) delega ambos comandos al binario Rust.
 
 ## Requisitos
 
-- Para `merge` (Python): Python 3.10+ y `pip install -e .`.
-- Para `compress` (Rust): ver [Rust (compress)](#rust-compress).
+- Binario (`compress` y `merge`): Rust + MuPDF. Ver [Rust](#rust).
+- Web: Python 3.10+ y `pip install -e .` (la única dependencia es `flask`).
 
 ## Instalación
 
-El paquete **Python** (para `merge` y la web):
+El paquete **Python** (solo la web):
 
 ```bash
 pip install -e .
 ```
 
-Esto instala las dependencias (`pymupdf`, `pillow`, `flask`) y deja disponibles
-el comando `pdf-toolkit` (con `merge`) y `pdf-toolkit-web` en el PATH. El modo
-editable (`-e`) refleja los cambios al instante.
+Esto instala `flask` y deja disponible el comando `pdf-toolkit-web` en el PATH.
+El modo editable (`-e`) refleja los cambios al instante.
 
-El binario **Rust** de `compress` se compila aparte (ver
-[Rust (compress)](#rust-compress)).
+El binario **Rust** se compila aparte (ver [Rust](#rust)).
+
+## Web
+
+La web necesita el binario Rust compilado (ver [Build](#build)) y el paquete
+instalado. Para levantarla:
+
+```bash
+pip install -e .        # una vez; deja `pdf-toolkit-web` en el PATH
+pdf-toolkit-web         # sirve la interfaz en http://127.0.0.1:5000
+```
+
+Desde ahí se suben PDFs para `compress` y `merge`. Opciones útiles:
+
+```bash
+pdf-toolkit-web --host 0.0.0.0 --port 8000    # cambia host/puerto
+```
+
+La web resuelve el binario en este orden: la variable de entorno
+`PDF_TOOLKIT_BIN`, `target/release/pdf-toolkit(.exe)`,
+`target/debug/pdf-toolkit(.exe)`, y por último `pdf-toolkit` en el PATH. Para
+apuntar a un binario concreto (PowerShell):
+
+```powershell
+$env:PDF_TOOLKIT_BIN = "C:\ruta\a\pdf-toolkit.exe"
+pdf-toolkit-web
+```
 
 ## Uso
 
-El `compress` es el binario **Rust**; `merge` es el comando **Python**:
-
 ```bash
-# compress (Rust) — ver "Rust (compress)" para el build
+# compress (Rust) — ver "Rust" para el build
 pdf-toolkit compress input.pdf                                 # input-compressed.pdf (150 dpi, quality 70)
 pdf-toolkit compress input.pdf -o out.pdf --dpi 200 --quality 60
 pdf-toolkit compress input.pdf --target 24mb                   # baja dpi/quality iterativamente hasta < 24 MB
 pdf-toolkit compress input.pdf --grayscale                     # convierte imágenes a escala de grises
 
-# merge (Python)
+# merge (Rust)
 pdf-toolkit merge a.pdf b.pdf c.pdf                            # a-merged.pdf (hojas en orden)
-```
-
-Si no querés instalar el paquete Python, podés correr `merge` con
-`python -m pdf_toolkit` desde la raíz del proyecto:
-
-```bash
-python -m pdf_toolkit                                            # lista los comandos / help
-python -m pdf_toolkit merge a.pdf b.pdf c.pdf                    # a-merged.pdf (hojas en orden)
+pdf-toolkit merge a.pdf b.pdf -o out.pdf --verbose
 ```
 
 ### Comando `compress`
@@ -84,10 +98,10 @@ Pega varios PDFs en uno solo, en el orden en que se pasan:
 | `-o, --output`| Archivo de salida (por defecto `<stem-del-primero>-merged.pdf`).             |
 | `--verbose`   | Imprime el detalle por archivo.                                             |
 
-## Rust (compress)
+## Rust
 
-El subcomando `compress` es un binario Rust con el crate `mupdf` (motor MuPDF).
-No usa Python ni depende de pip.
+Los subcomandos `compress` y `merge` viven en un único binario Rust con el crate
+`mupdf` (motor MuPDF). No usan Python ni dependen de pip.
 
 ### Build
 
@@ -113,46 +127,30 @@ alineación de 8 bytes en x64). Ver [messense/mupdf-rs#222](https://github.com/m
 ### Uso
 
 ```bash
-target\release\pdf-toolkit.exe compress input.pdf                 # input-compressed.pdf
+target\release\pdf-toolkit.exe compress input.pdf                # input-compressed.pdf
 target\release\pdf-toolkit.exe compress input.pdf --target 24mb
 target\release\pdf-toolkit.exe compress input.pdf --grayscale
+target\release\pdf-toolkit.exe merge a.pdf b.pdf c.pdf           # a-merged.pdf
 ```
 
-Nota: durante la transición conviven dos binarios `pdf-toolkit` (el Rust con
-`compress` y el console-script de Python con `merge`). Se unifican al portar
-`merge` y retirar el paquete Python.
+Nota sobre el retiro del Python: si antes instalaste el paquete Python, puede
+quedar un console-script `pdf-toolkit` viejo en el PATH que gane por orden de
+resolución al binario Rust. Corré `pip uninstall pdf-toolkit` (o reinstalá
+limpio) para eliminarlo.
 
 ## Estructura
 
 ```
-# Rust (compress)
+# Rust (compress + merge)
 Cargo.toml
-src/main.rs              # CLI clap + subcomando `compress`
+src/main.rs              # CLI clap + subcomandos `compress` y `merge`
 vendor/mupdf/            # crate mupdf vendoreado (patch Windows/MSVC)
 
-# Python (merge + web)
+# Python (web)
 pdf_toolkit/
-├── cli.py            # argparse: construye los subcomandos desde el registry
-├── command.py        # contrato Command (name / help / add_arguments / run)
-├── utils.py          # helpers compartidos (human_size, parse_size)
-├── commands/
-│   ├── __init__.py   # registry: import + register() por comando
-│   └── merge.py      # subcomando `merge`
 └── web/
-    └── app.py        # Flask; /compress delega al binario Rust
+    └── app.py        # Flask; /compress y /merge delegan al binario Rust
 ```
-
-## Añadir un comando
-
-1. Crea `pdf_toolkit/commands/<nombre>.py` exponiendo `command = Command(...)`.
-2. Impórtalo y regístralo en `pdf_toolkit/commands/__init__.py`:
-
-```python
-from . import <nombre>
-register(<nombre>.command)
-```
-
-`cli.py` se encarga del resto automáticamente.
 
 ## Roadmap
 
