@@ -143,7 +143,14 @@ limpio) para eliminarlo.
 ```
 # Rust (compress + merge)
 Cargo.toml
-src/main.rs              # CLI clap + subcomandos `compress` y `merge`
+src/lib.rs               # módulos + `pub type Result<T>`
+src/main.rs              # binario: parsea `Cli` y despacha a `run_compress`/`run_merge`
+src/cli.rs               # structs clap (`Cli`, `Command`, `CompressArgs`, `MergeArgs`)
+src/utils.rs             # `human_size`, `parse_size`, `default_output`
+src/image.rs             # helpers de imagen (privado, solo lo usa `compress`)
+src/compress.rs          # pipeline de `compress` + `run_compress`
+src/merge.rs             # lógica de `merge` + `run_merge`
+tests/utils.rs           # tests de integración (`parse_size` / `human_size` / `default_output`)
 vendor/mupdf/            # crate mupdf vendoreado (patch Windows/MSVC)
 
 # Python (web)

@@ -9,7 +9,14 @@ Python part is installable locally: `pip install -e .` exposes
 ## Layout
 
     Cargo.toml            # Rust crate `pdf-toolkit` (bin `pdf-toolkit`)
-    src/main.rs           # clap CLI + `compress` and `merge` subcommands
+    src/lib.rs            # module declarations + `pub type Result<T>`
+    src/main.rs           # bin: parses `Cli` and dispatches to `run_compress`/`run_merge`
+    src/cli.rs            # clap structs (`Cli`, `Command`, `CompressArgs`, `MergeArgs`)
+    src/utils.rs          # `human_size`, `parse_size`, `default_output`
+    src/image.rs          # image helpers (private; only used by `compress`)
+    src/compress.rs       # `compress` pipeline + `run_compress`
+    src/merge.rs          # `merge` logic + `run_merge`
+    tests/utils.rs        # integration tests (`parse_size` / `human_size` / `default_output`)
     vendor/mupdf/         # vendored mupdf crate (Windows/MSVC patch)
 
     pdf_toolkit/
@@ -18,7 +25,7 @@ Python part is installable locally: `pip install -e .` exposes
 
     pyproject.toml        # Python packaging + console entry point
 
-`compress` and `merge` live in `src/main.rs`.
+`compress` lives in `src/compress.rs`; `merge` lives in `src/merge.rs`.
 
 ## Run
 
