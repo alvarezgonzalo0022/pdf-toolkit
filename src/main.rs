@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -5,7 +6,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, RgbImage};
-use mupdf::pdf::{PdfDocument, PdfWriteOptions};
+use mupdf::pdf::{InsertPdfOptions, PdfDocument, PdfWriteOptions};
 use mupdf::{Image, PageImageInfo, PageImageSource, Pixmap};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -29,6 +30,9 @@ struct Cli {
 enum Command {
     /// reduce a PDF's file size
     Compress(CompressArgs),
+
+    /// concatenate multiple PDFs into one
+    Merge(MergeArgs),
 }
 
 #[derive(Args)]
@@ -61,6 +65,21 @@ struct CompressArgs {
     target: Option<u64>,
 
     /// print per-image details
+    #[arg(long)]
+    verbose: bool,
+}
+
+#[derive(Args)]
+struct MergeArgs {
+    /// PDF files to merge, in order
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+
+    /// output PDF file (default: <first-stem>-merged.pdf)
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// print per-file details
     #[arg(long)]
     verbose: bool,
 }
@@ -380,12 +399,12 @@ fn compress_doc(
     Ok((out, changed, total))
 }
 
-fn default_output(input: &Path) -> PathBuf {
+fn default_output(input: &Path, suffix: &str) -> PathBuf {
     let mut name = input
         .file_stem()
         .map(|s| s.to_os_string())
         .unwrap_or_default();
-    name.push("-compressed.pdf");
+    name.push(suffix);
     input.with_file_name(name)
 }
 
@@ -463,7 +482,7 @@ fn run_compress(args: CompressArgs) -> Result<u8> {
     let output = args
         .output
         .clone()
-        .unwrap_or_else(|| default_output(&args.input));
+        .unwrap_or_else(|| default_output(&args.input, "-compressed.pdf"));
 
     let src_size = fs::metadata(&args.input)?.len();
     println!("input : {}  ({})", args.input.display(), human_size(src_size as i64));
@@ -493,10 +512,119 @@ fn run_compress(args: CompressArgs) -> Result<u8> {
     Ok(0)
 }
 
+fn abspath(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[derive(Debug)]
+struct EncryptedPdfError {
+    path: PathBuf,
+}
+
+impl fmt::Display for EncryptedPdfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "encrypted PDF (password required): {}",
+            self.path.display()
+        )
+    }
+}
+
+impl std::error::Error for EncryptedPdfError {}
+
+fn merge_docs(inputs: &[PathBuf], verbose: bool) -> Result<(Vec<u8>, usize)> {
+    let mut doc = PdfDocument::new();
+    let mut total = 0usize;
+
+    for path in inputs {
+        let data = fs::read(path)?;
+        let src = PdfDocument::from_bytes(&data)?;
+        if src.needs_password()? {
+            return Err(Box::new(EncryptedPdfError { path: path.clone() }));
+        }
+        let pages = src.page_count()? as usize;
+        doc.insert_pdf(&src, InsertPdfOptions::default())?;
+        if verbose {
+            println!("  + {} ({} pages)", path.display(), pages);
+        }
+        total += pages;
+    }
+
+    let mut options = PdfWriteOptions::default();
+    options.set_garbage_level(4); // garbage=4
+    options.set_compress(true); // deflate=True
+
+    let mut out = Vec::new();
+    doc.write_to_with_options(&mut out, options)?;
+    Ok((out, total))
+}
+
+fn run_merge(args: MergeArgs) -> Result<u8> {
+    for input in &args.inputs {
+        if !input.is_file() {
+            eprintln!("error: input not found: {}", input.display());
+            return Ok(2);
+        }
+    }
+
+    let output = args
+        .output
+        .clone()
+        .unwrap_or_else(|| default_output(&args.inputs[0], "-merged.pdf"));
+
+    let out_abs = abspath(&output);
+    for input in &args.inputs {
+        if abspath(input) == out_abs {
+            eprintln!(
+                "error: output would overwrite an input: {}",
+                output.display()
+            );
+            return Ok(2);
+        }
+    }
+
+    println!("inputs: {} files", args.inputs.len());
+
+    let (out, total) = match merge_docs(&args.inputs, args.verbose) {
+        Ok(merged) => merged,
+        Err(err) => {
+            if err.downcast_ref::<EncryptedPdfError>().is_some() {
+                eprintln!("error: {err}");
+                return Ok(2);
+            }
+            return Err(err);
+        }
+    };
+
+    fs::write(&output, out)?;
+
+    let out_size = fs::metadata(&output)?.len();
+    println!(
+        "output: {}  ({}, {} pages)",
+        output.display(),
+        human_size(out_size as i64),
+        total
+    );
+    Ok(0)
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let code = match cli.command {
         Command::Compress(args) => match run_compress(args) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("error: {err}");
+                1
+            }
+        },
+        Command::Merge(args) => match run_merge(args) {
             Ok(code) => code,
             Err(err) => {
                 eprintln!("error: {err}");
@@ -534,5 +662,21 @@ mod tests {
         assert_eq!(human_size(1024), "1.0 KB");
         assert_eq!(human_size(1048576), "1.0 MB");
         assert_eq!(human_size(1073741824), "1.0 GB");
+    }
+
+    #[test]
+    fn test_default_output() {
+        assert_eq!(
+            default_output(Path::new("a.pdf"), "-merged.pdf"),
+            PathBuf::from("a-merged.pdf")
+        );
+        assert_eq!(
+            default_output(Path::new("a.b.pdf"), "-merged.pdf"),
+            PathBuf::from("a.b-merged.pdf")
+        );
+        assert_eq!(
+            default_output(Path::new("input.pdf"), "-compressed.pdf"),
+            PathBuf::from("input-compressed.pdf")
+        );
     }
 }

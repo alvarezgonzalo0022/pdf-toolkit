@@ -1,6 +1,6 @@
 # SPEC 02 — Port de `compress` a Rust
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** —
 > **Fecha:** 2026-11-26
 > **Objetivo:** Crear un binario Rust `pdf-toolkit` con el subcomando `compress` que reemplace al `compress` de Python, con paridad funcional y `mupdf` como motor PDF.
