@@ -1,44 +1,52 @@
 # pdf-toolkit
 
-Un toolkit de línea de comandos para manipular PDFs, construido sobre
-[PyMuPDF](https://pymupdf.readthedocs.io/). Por ahora solo tiene el comando
-`compress`, pero la arquitectura está pensada para ir sumando funciones
-(`merge`, `split`, `rotate`, `encrypt`, etc.) sin tocar el CLI.
+Un toolkit de línea de comandos para manipular PDFs.
+
+- **`compress`** es un binario **Rust** (crate `pdf-toolkit`) construido sobre
+  MuPDF. Reemplaza al `compress` de Python con paridad funcional.
+- **`merge`** sigue en **Python** (PyMuPDF). La **web** (Flask) delega el
+  `compress` al binario Rust y corre el `merge` en Python.
 
 ## Requisitos
 
-- Python 3.10+
+- Para `merge` (Python): Python 3.10+ y `pip install -e .`.
+- Para `compress` (Rust): ver [Rust (compress)](#rust-compress).
 
 ## Instalación
+
+El paquete **Python** (para `merge` y la web):
 
 ```bash
 pip install -e .
 ```
 
-Esto instala las dependencias (`pymupdf`, `pillow`) y deja disponible el comando
-`pdf-toolkit` en el PATH, así podés usarlo desde cualquier carpeta. El modo
-editable (`-e`) hace que los cambios en el código se reflejen al instante.
+Esto instala las dependencias (`pymupdf`, `pillow`, `flask`) y deja disponibles
+el comando `pdf-toolkit` (con `merge`) y `pdf-toolkit-web` en el PATH. El modo
+editable (`-e`) refleja los cambios al instante.
+
+El binario **Rust** de `compress` se compila aparte (ver
+[Rust (compress)](#rust-compress)).
 
 ## Uso
 
+El `compress` es el binario **Rust**; `merge` es el comando **Python**:
+
 ```bash
-pdf-toolkit                                                     # lista los comandos / help
+# compress (Rust) — ver "Rust (compress)" para el build
 pdf-toolkit compress input.pdf                                 # input-compressed.pdf (150 dpi, quality 70)
 pdf-toolkit compress input.pdf -o out.pdf --dpi 200 --quality 60
 pdf-toolkit compress input.pdf --target 24mb                   # baja dpi/quality iterativamente hasta < 24 MB
 pdf-toolkit compress input.pdf --grayscale                     # convierte imágenes a escala de grises
+
+# merge (Python)
 pdf-toolkit merge a.pdf b.pdf c.pdf                            # a-merged.pdf (hojas en orden)
 ```
 
-Si no querés instalarlo, podés correrlo igual con `python -m pdf_toolkit` desde
-la raíz del proyecto.
+Si no querés instalar el paquete Python, podés correr `merge` con
+`python -m pdf_toolkit` desde la raíz del proyecto:
 
 ```bash
 python -m pdf_toolkit                                            # lista los comandos / help
-python -m pdf_toolkit compress input.pdf                         # input-compressed.pdf (150 dpi, quality 70)
-python -m pdf_toolkit compress input.pdf -o out.pdf --dpi 200 --quality 60
-python -m pdf_toolkit compress input.pdf --target 24mb           # baja dpi/quality iterativamente hasta < 24 MB
-python -m pdf_toolkit compress input.pdf --grayscale             # convierte imágenes a escala de grises
 python -m pdf_toolkit merge a.pdf b.pdf c.pdf                    # a-merged.pdf (hojas en orden)
 ```
 
@@ -57,7 +65,7 @@ Reduce el tamaño de un PDF:
 | `-o, --output`| Archivo de salida (por defecto `<nombre>-compressed.pdf`).                   |
 | `--dpi`       | Resolución objetivo de las imágenes (default `150`).                         |
 | `--quality`   | Calidad JPEG, 1–100 (default `70`).                                         |
-| `--min-dpi`   | Sin efecto por ahora (ver `AGENTS.md`).                                     |
+| `--min-dpi`   | Salta imágenes cuyo DPI efectivo ≤ `--min-dpi` (default `72`).           |
 | `--grayscale` | Convierte las imágenes a escala de grises.                                   |
 | `--target`    | Tamaño máximo objetivo (p. ej. `24mb`); ajusta dpi/quality hasta lograrlo.   |
 | `--verbose`   | Imprime el detalle por imagen.                                              |
@@ -76,17 +84,62 @@ Pega varios PDFs en uno solo, en el orden en que se pasan:
 | `-o, --output`| Archivo de salida (por defecto `<stem-del-primero>-merged.pdf`).             |
 | `--verbose`   | Imprime el detalle por archivo.                                             |
 
+## Rust (compress)
+
+El subcomando `compress` es un binario Rust con el crate `mupdf` (motor MuPDF).
+No usa Python ni depende de pip.
+
+### Build
+
+```bash
+cargo build --release      # produce target/release/pdf-toolkit.exe
+```
+
+Requisitos del toolchain (probado en Windows x64):
+
+- **Rust** (rustup, toolchain `stable-x86_64-pc-windows-msvc`).
+- **Visual Studio 2022 Build Tools** con el workload *Desktop development with
+  C++* (`Microsoft.VisualStudio.Workload.VCTools`): aporta `cl.exe`, `msbuild.exe`
+  y el Windows SDK.
+- **LLVM** (provee `libclang.dll`/`clang`, que `mupdf-sys` usa en el paso de
+  `bindgen`). Asegurate de que `LIBCLANG_PATH` apunte a `bin/` de LLVM, p. ej.:
+  `$env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"`.
+
+`mupdf` está vendoreado en `vendor/mupdf` con un patch de una línea
+(`device/native.rs`): en Windows/MSVC `bindgen` no emite el tipo `max_align_t`
+(solo lo define MSVC en modo C++), así que se reemplaza por `usize` (misma
+alineación de 8 bytes en x64). Ver [messense/mupdf-rs#222](https://github.com/messense/mupdf-rs/issues/222).
+
+### Uso
+
+```bash
+target\release\pdf-toolkit.exe compress input.pdf                 # input-compressed.pdf
+target\release\pdf-toolkit.exe compress input.pdf --target 24mb
+target\release\pdf-toolkit.exe compress input.pdf --grayscale
+```
+
+Nota: durante la transición conviven dos binarios `pdf-toolkit` (el Rust con
+`compress` y el console-script de Python con `merge`). Se unifican al portar
+`merge` y retirar el paquete Python.
+
 ## Estructura
 
 ```
+# Rust (compress)
+Cargo.toml
+src/main.rs              # CLI clap + subcomando `compress`
+vendor/mupdf/            # crate mupdf vendoreado (patch Windows/MSVC)
+
+# Python (merge + web)
 pdf_toolkit/
 ├── cli.py            # argparse: construye los subcomandos desde el registry
 ├── command.py        # contrato Command (name / help / add_arguments / run)
 ├── utils.py          # helpers compartidos (human_size, parse_size)
-└── commands/
-    ├── __init__.py   # registry: import + register() por comando
-    ├── compress.py   # subcomando `compress`
-    └── merge.py      # subcomando `merge`
+├── commands/
+│   ├── __init__.py   # registry: import + register() por comando
+│   └── merge.py      # subcomando `merge`
+└── web/
+    └── app.py        # Flask; /compress delega al binario Rust
 ```
 
 ## Añadir un comando

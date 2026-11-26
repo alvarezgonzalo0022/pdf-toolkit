@@ -1,0 +1,24 @@
+[package]
+name = "pdf-toolkit"
+version = "0.1.0"
+edition = "2021"
+description = "A small multi-command PDF toolkit (Rust port)."
+license = "MIT"
+
+[[bin]]
+name = "pdf-toolkit"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+mupdf = { version = "0.8", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+# Patch mupdf 0.8.0 for Windows/MSVC: bindgen does not emit `max_align_t`
+# (see messense/mupdf-rs#222), so we vendor the crate and replace the
+# reference with `usize` (same alignment on 64-bit).
+[patch.crates-io]
+mupdf = { path = "vendor/mupdf" }
+
+[profile.release]
+strip = true

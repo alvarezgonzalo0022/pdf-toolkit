@@ -1,16 +1,19 @@
-"""Flask web app that runs `compress` and `merge` entirely in memory.
+"""Flask web app for `compress` (Rust binary) and `merge` (Python).
 
 Endpoints accept multipart uploads and return the processed PDF as an
-attachment. Nothing is written to disk.
+attachment. `compress` delegates to the Rust `pdf-toolkit` binary via a
+temporary directory; `merge` runs in memory.
 """
 
 import argparse
 import io
 import os
+import shutil
+import subprocess
+import tempfile
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from ..commands.compress import compress_bytes, compress_bytes_to_target
 from ..commands.merge import merge_bytes
 from ..utils import parse_size
 
@@ -67,6 +70,59 @@ def _pdf_response(data, filename):
     )
 
 
+def _find_binary():
+    """Locate the Rust `pdf-toolkit` binary.
+
+    Resolution order: the `PDF_TOOLKIT_BIN` env var, the `target/release` and
+    `target/debug` builds relative to the project root, then `PATH`.
+    """
+    override = os.environ.get("PDF_TOOLKIT_BIN")
+    if override:
+        return override
+
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    exe = ".exe" if os.name == "nt" else ""
+    for profile in ("release", "debug"):
+        candidate = os.path.join(root, "target", profile, f"pdf-toolkit{exe}")
+        if os.path.isfile(candidate):
+            return candidate
+
+    return shutil.which("pdf-toolkit")
+
+
+def _compress_rust(data, dpi, quality, grayscale, target):
+    """Run the Rust `compress` binary and return the resulting PDF bytes."""
+    binary = _find_binary()
+    if binary is None:
+        raise RuntimeError(
+            "el binario Rust `pdf-toolkit` no está disponible; "
+            "compile con `cargo build --release`"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "input.pdf")
+        out_path = os.path.join(tmp, "output.pdf")
+        with open(in_path, "wb") as fh:
+            fh.write(data)
+
+        cmd = [
+            binary, "compress", in_path, "-o", out_path,
+            "--dpi", str(dpi), "--quality", str(quality),
+        ]
+        if grayscale:
+            cmd.append("--grayscale")
+        if target is not None:
+            cmd += ["--target", str(target)]
+
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            message = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(message or f"compress falló (exit {proc.returncode})")
+
+        with open(out_path, "rb") as fh:
+            return fh.read()
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -91,10 +147,7 @@ def compress():
 
     data = file.read()
     try:
-        if target is not None:
-            out, _, _ = compress_bytes_to_target(data, dpi, quality, grayscale, target)
-        else:
-            out = compress_bytes(data, dpi, quality, grayscale)
+        out = _compress_rust(data, dpi, quality, grayscale, target)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
