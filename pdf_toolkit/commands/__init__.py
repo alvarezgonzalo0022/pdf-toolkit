@@ -5,7 +5,7 @@ instance (see `pdf_toolkit.command.Command`), then import it and `register()`
 it below.
 """
 
-from . import compress, merge
+from . import merge
 
 COMMANDS = {}
 
@@ -15,5 +15,4 @@ def register(command):
     return command
 
 
-register(compress.command)
 register(merge.command)
