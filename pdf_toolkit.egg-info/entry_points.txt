@@ -1,0 +1,3 @@
+[console_scripts]
+pdf-toolkit = pdf_toolkit.cli:main
+pdf-toolkit-web = pdf_toolkit.web.app:main

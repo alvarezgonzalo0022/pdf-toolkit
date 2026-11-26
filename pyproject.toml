@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-toolkit"
+description = "A small multi-command PDF toolkit built on PyMuPDF."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dynamic = ["version"]
+dependencies = [
+    "pymupdf",
+    "pillow",
+    "flask",
+]
+
+[project.scripts]
+pdf-toolkit = "pdf_toolkit.cli:main"
+pdf-toolkit-web = "pdf_toolkit.web.app:main"
+
+[tool.setuptools]
+packages = ["pdf_toolkit", "pdf_toolkit.commands", "pdf_toolkit.web"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pdf_toolkit.__version__" }

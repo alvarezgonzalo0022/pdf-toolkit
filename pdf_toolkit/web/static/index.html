@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pdf-toolkit</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <h1>pdf-toolkit</h1>
+
+    <section>
+      <h2>Compress</h2>
+      <form id="compress-form">
+        <label>
+          PDF
+          <input type="file" name="file" accept="application/pdf" required>
+        </label>
+        <label>
+          DPI
+          <input type="number" name="dpi" value="150" min="1">
+        </label>
+        <label>
+          Quality (1-100)
+          <input type="number" name="quality" value="70" min="1" max="100">
+        </label>
+        <label class="inline">
+          <input type="checkbox" name="grayscale">
+          Grayscale
+        </label>
+        <label>
+          Target size (optional, e.g. <code>1mb</code>)
+          <input type="text" name="target" placeholder="e.g. 1mb">
+        </label>
+        <button type="submit">Compress</button>
+        <p class="error" hidden></p>
+      </form>
+    </section>
+
+    <section>
+      <h2>Merge</h2>
+      <form id="merge-form">
+        <label>
+          PDFs (in order)
+          <input type="file" name="files" accept="application/pdf" multiple required>
+        </label>
+        <button type="submit">Merge</button>
+        <p class="error" hidden></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
